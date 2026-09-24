@@ -1,3 +1,4 @@
+import argparse
 import json
 import random
 import time
@@ -6,12 +7,19 @@ from datetime import datetime, timezone
 
 from confluent_kafka import Producer
 
-BOOTSTRAP = "localhost:29092"
-TOPIC = "checkout.events"
-
 CURRENCIES = ["USD", "EUR", "INR", "GBP"]
 PAYMENTS = ["card", "upi", "paypal", "cod"]
 COUNTRIES = ["US", "IN", "DE", "GB", "BR"]
+
+# Counts what Kafka actually confirmed, not just what we queued
+stats = {"ok": 0, "failed": 0}
+
+
+def on_delivery(err, msg):
+    if err:
+        stats["failed"] += 1
+    else:
+        stats["ok"] += 1
 
 
 def make_event():
@@ -31,17 +39,49 @@ def make_event():
     }
 
 
-def main():
-    producer = Producer({"bootstrap.servers": BOOTSTRAP})
-    sent = 0
+def send(producer, topic, event):
+    payload = json.dumps(event)
     while True:
-        for _ in range(5):  # low fixed rate for now; commit 4 makes it configurable
-            e = make_event()
-            producer.produce(TOPIC, key=str(e["user_id"]), value=json.dumps(e))
-            producer.poll(0)
-            sent += 1
-        print(f"sent={sent}", flush=True)
-        time.sleep(1)
+        try:
+            producer.produce(topic, key=str(event["user_id"]), value=payload,
+                             callback=on_delivery)
+            return
+        except BufferError:
+            producer.poll(0.1)  # local queue full: let delivery catch up, then retry
+
+
+def main():
+    ap = argparse.ArgumentParser(description="IceStream checkout event generator")
+    ap.add_argument("--rate", type=int, default=2000, help="events per second")
+    ap.add_argument("--bootstrap", default="localhost:29092")
+    ap.add_argument("--topic", default="checkout.events")
+    args = ap.parse_args()
+
+    producer = Producer({
+        "bootstrap.servers": args.bootstrap,
+        "linger.ms": 20,                       # batch messages for up to 20 ms
+        "compression.type": "lz4",
+        "queue.buffering.max.messages": 500000,
+    })
+
+    print(f"Producing {args.rate} events/sec to '{args.topic}' (Ctrl+C to stop)")
+    sent = 0
+    try:
+        while True:
+            tick = time.time()
+            for _ in range(args.rate):
+                send(producer, args.topic, make_event())
+                producer.poll(0)
+            sent += args.rate
+            elapsed = time.time() - tick
+            print(f"sent={sent} delivered={stats['ok']} failed={stats['failed']} "
+                  f"batch_time={elapsed:.2f}s", flush=True)
+            time.sleep(max(0, 1 - elapsed))   # hold the 1-second cadence
+    except KeyboardInterrupt:
+        print("\nStopping, waiting for remaining messages to be delivered...")
+    finally:
+        producer.flush(60)                     # wait up to 60s for the queue to empty
+        print(f"Final: delivered={stats['ok']} failed={stats['failed']}")
 
 
 if __name__ == "__main__":
