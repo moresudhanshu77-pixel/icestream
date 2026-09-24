@@ -1,3 +1,5 @@
 {
-  "null_rate": 0.005
+  "null_rate": 0.005,
+  "drift": "none",
+  "drift_rate": 1.0
 }

@@ -50,8 +50,19 @@ def load_chaos(path):
 
 
 def inject_faults(event, chaos):
+    # Fault 1: NULL tax_amount
     if random.random() < chaos.get("null_rate", 0.005):
         event["tax_amount"] = None
+
+    # Fault 2: schema drift (applied to a fraction of events)
+    drift = chaos.get("drift", "none")
+    if drift != "none" and random.random() < chaos.get("drift_rate", 1.0):
+        if drift == "rename":            # tax_amount -> tax_amt
+            event["tax_amt"] = event.pop("tax_amount")
+        elif drift == "retype":          # number -> string
+            event["subtotal"] = str(event["subtotal"])
+        elif drift == "new_column":      # unexpected extra field
+            event["loyalty_tier"] = random.choice(["bronze", "silver", "gold"])
     return event
 
 
