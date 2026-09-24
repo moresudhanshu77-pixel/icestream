@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import random
 import time
 import uuid
@@ -39,6 +40,21 @@ def make_event():
     }
 
 
+def load_chaos(path):
+    """Re-read the chaos file every second so faults can be flipped live."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}   # missing or half-written file: fall back to defaults
+
+
+def inject_faults(event, chaos):
+    if random.random() < chaos.get("null_rate", 0.005):
+        event["tax_amount"] = None
+    return event
+
+
 def send(producer, topic, event):
     payload = json.dumps(event)
     while True:
@@ -55,6 +71,7 @@ def main():
     ap.add_argument("--rate", type=int, default=2000, help="events per second")
     ap.add_argument("--bootstrap", default="localhost:29092")
     ap.add_argument("--topic", default="checkout.events")
+    ap.add_argument("--chaos", default=os.path.join(os.path.dirname(__file__), "chaos.json"))
     args = ap.parse_args()
 
     producer = Producer({
@@ -69,13 +86,14 @@ def main():
     try:
         while True:
             tick = time.time()
+            chaos = load_chaos(args.chaos)
             for _ in range(args.rate):
-                send(producer, args.topic, make_event())
+                send(producer, args.topic, inject_faults(make_event(), chaos))
                 producer.poll(0)
             sent += args.rate
             elapsed = time.time() - tick
             print(f"sent={sent} delivered={stats['ok']} failed={stats['failed']} "
-                  f"batch_time={elapsed:.2f}s", flush=True)
+                  f"batch_time={elapsed:.2f}s chaos={chaos}", flush=True)
             time.sleep(max(0, 1 - elapsed))   # hold the 1-second cadence
     except KeyboardInterrupt:
         print("\nStopping, waiting for remaining messages to be delivered...")
