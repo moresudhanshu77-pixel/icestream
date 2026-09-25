@@ -24,3 +24,17 @@ services:
     command: >
       "sleep 10 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
       --create --if-not-exists --topic checkout.events --partitions 3 --replication-factor 1"
+
+  iceberg-rest:
+    image: tabulario/iceberg-rest:1.6.0
+    container_name: iceberg-rest
+    ports:
+      - "8181:8181"
+    environment:
+      CATALOG_WAREHOUSE: /warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.hadoop.HadoopFileIO
+    volumes:
+      - iceberg-warehouse:/warehouse
+
+volumes:
+  iceberg-warehouse:
