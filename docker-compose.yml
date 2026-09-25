@@ -36,5 +36,27 @@ services:
     volumes:
       - iceberg-warehouse:/warehouse
 
+  jobmanager:
+    build: ./infra/flink
+    container_name: jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./flink/sql:/opt/sql
+    environment: &flinkenv
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        state.backend: hashmap
+        execution.checkpointing.interval: 10s
+
+  taskmanager:
+    build: ./infra/flink
+    container_name: taskmanager
+    command: taskmanager
+    depends_on: [jobmanager]
+    environment: *flinkenv
+
 volumes:
   iceberg-warehouse:
