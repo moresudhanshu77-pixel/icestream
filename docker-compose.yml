@@ -25,17 +25,37 @@ services:
       "sleep 10 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
       --create --if-not-exists --topic checkout.events --partitions 3 --replication-factor 1"
 
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+
+  localstack-init:
+    image: curlimages/curl:8.9.1
+    depends_on: [localstack]
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "sleep 8 && curl -X PUT http://localstack:4566/warehouse"
+
   iceberg-rest:
     image: tabulario/iceberg-rest:1.6.0
     container_name: iceberg-rest
-    user: "0:0"
+    depends_on: [localstack-init]
     ports:
       - "8181:8181"
     environment:
-      CATALOG_WAREHOUSE: /warehouse
-      CATALOG_IO__IMPL: org.apache.iceberg.hadoop.HadoopFileIO
-    volumes:
-      - iceberg-warehouse:/warehouse
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://localstack:4566
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
 
   jobmanager:
     build: ./infra/flink
@@ -46,6 +66,9 @@ services:
     volumes:
       - ./flink/sql:/opt/sql
     environment: &flinkenv
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 4
